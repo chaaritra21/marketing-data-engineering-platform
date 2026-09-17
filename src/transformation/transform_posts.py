@@ -1,3 +1,4 @@
+from src.validation.data_quality import validate_processed_data
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -100,6 +101,9 @@ def main():
     try:
         df = load_raw_data()
         df = transform_data(df)
+
+        validate_processed_data(df)
+
         save_processed_data(df)
 
         logging.info(
