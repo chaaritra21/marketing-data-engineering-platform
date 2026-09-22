@@ -7,7 +7,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
 DB_CONFIG = {
     "host": os.getenv("DB_HOST"),
     "port": os.getenv("DB_PORT"),
@@ -16,7 +15,8 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD"),
 }
 
-SQL_FILE = Path("sql/warehouse/create_warehouse.sql")
+CREATE_SQL_FILE = Path("sql/warehouse/create_warehouse.sql")
+LOAD_SQL_FILE = Path("sql/warehouse/load_dimensions.sql")
 
 
 def setup_logging():
@@ -26,58 +26,70 @@ def setup_logging():
     )
 
 
-def execute_sql_file():
-    """Execute the warehouse DDL SQL file."""
+def read_sql_file(path: Path) -> str:
+    """Read SQL from a file."""
 
-    if not SQL_FILE.exists():
-        raise FileNotFoundError(
-            f"SQL file not found: {SQL_FILE}"
-        )
+    if not path.exists():
+        raise FileNotFoundError(f"SQL file not found: {path}")
 
-    logging.info(
-        "Loading SQL from %s",
-        SQL_FILE
-    )
+    return path.read_text(encoding="utf-8")
 
-    sql = SQL_FILE.read_text(encoding="utf-8")
+
+def execute_sql(connection, sql: str):
+    """Execute a SQL script."""
+
+    with connection.cursor() as cursor:
+        cursor.execute(sql)
+
+
+def warehouse_setup():
+    """Create warehouse tables and load dimensions."""
 
     connection = None
 
     try:
+        logging.info("Connecting to PostgreSQL")
+
         connection = psycopg2.connect(**DB_CONFIG)
 
-        with connection.cursor() as cursor:
-            cursor.execute(sql)
+        logging.info("Creating warehouse tables")
+
+        create_sql = read_sql_file(CREATE_SQL_FILE)
+        execute_sql(connection, create_sql)
+
+        logging.info("Warehouse tables verified")
+
+        logging.info("Loading warehouse dimensions")
+
+        load_sql = read_sql_file(LOAD_SQL_FILE)
+        execute_sql(connection, load_sql)
 
         connection.commit()
 
-        logging.info(
-            "Warehouse tables created successfully"
-        )
+        logging.info("Warehouse dimensions loaded successfully")
 
     except Exception as error:
         if connection:
             connection.rollback()
 
-        logging.error(
-            "Warehouse setup failed: %s",
-            error
-        )
-
+        logging.error("Warehouse pipeline failed: %s", error)
         raise
 
     finally:
         if connection:
             connection.close()
 
+        logging.info("PostgreSQL connection closed")
+
 
 def main():
     setup_logging()
-    execute_sql_file()
 
-    logging.info(
-        "Warehouse setup completed successfully"
-    )
+    logging.info("Starting warehouse pipeline")
+
+    warehouse_setup()
+
+    logging.info("Warehouse pipeline completed successfully")
 
 
 if __name__ == "__main__":
