@@ -5,6 +5,12 @@ from pathlib import Path
 import psycopg2
 from dotenv import load_dotenv
 
+from src.warehouse.etl_audit import (
+    create_audit_run,
+    mark_audit_failed,
+    mark_audit_success,
+)
+
 load_dotenv()
 
 
@@ -16,9 +22,17 @@ DB_CONFIG = {
     "password": os.getenv("DB_PASSWORD"),
 }
 
-CREATE_SQL_FILE = Path("sql/warehouse/create_warehouse.sql")
-LOAD_DIMENSIONS_SQL_FILE = Path("sql/warehouse/load_dimensions.sql")
-LOAD_FACT_SQL_FILE = Path("sql/warehouse/load_fact.sql")
+CREATE_SQL_FILE = Path(
+    "sql/warehouse/create_warehouse.sql"
+)
+
+LOAD_DIMENSIONS_SQL_FILE = Path(
+    "sql/warehouse/load_dimensions.sql"
+)
+
+LOAD_FACT_SQL_FILE = Path(
+    "sql/warehouse/load_fact.sql"
+)
 
 
 def setup_logging():
@@ -36,7 +50,9 @@ def read_sql_file(path: Path) -> str:
             f"SQL file not found: {path}"
         )
 
-    return path.read_text(encoding="utf-8")
+    return path.read_text(
+        encoding="utf-8"
+    )
 
 
 def execute_sql(connection, sql: str):
@@ -46,14 +62,25 @@ def execute_sql(connection, sql: str):
         cursor.execute(sql)
 
 
-def get_row_count(connection, table_name: str) -> int:
+def get_row_count(
+    connection,
+    table_name: str
+) -> int:
     """Return row count for a warehouse table."""
 
     allowed_tables = {
-        "dim_customer": "warehouse.dim_customer",
-        "dim_campaign": "warehouse.dim_campaign",
-        "dim_channel": "warehouse.dim_channel",
-        "dim_date": "warehouse.dim_date",
+        "dim_customer":
+            "warehouse.dim_customer",
+
+        "dim_campaign":
+            "warehouse.dim_campaign",
+
+        "dim_channel":
+            "warehouse.dim_channel",
+
+        "dim_date":
+            "warehouse.dim_date",
+
         "fact_campaign_performance":
             "warehouse.fact_campaign_performance",
     }
@@ -65,88 +92,127 @@ def get_row_count(connection, table_name: str) -> int:
 
     with connection.cursor() as cursor:
         cursor.execute(
-            f"SELECT COUNT(*) FROM {allowed_tables[table_name]}"
+            f"""
+            SELECT COUNT(*)
+            FROM {allowed_tables[table_name]}
+            """
         )
+
         return cursor.fetchone()[0]
 
 
+def get_warehouse_counts(connection):
+    """Get all warehouse row counts."""
+
+    return {
+        "customers": get_row_count(
+            connection,
+            "dim_customer"
+        ),
+        "campaigns": get_row_count(
+            connection,
+            "dim_campaign"
+        ),
+        "channels": get_row_count(
+            connection,
+            "dim_channel"
+        ),
+        "dates": get_row_count(
+            connection,
+            "dim_date"
+        ),
+        "facts": get_row_count(
+            connection,
+            "fact_campaign_performance"
+        ),
+    }
+
+
 def warehouse_setup():
-    """Create warehouse tables and load warehouse data."""
+    """Run the warehouse loading process."""
 
     connection = None
+    run_id = create_audit_run()
 
     try:
-        logging.info("Connecting to PostgreSQL")
+        logging.info(
+            "Starting warehouse pipeline | run_id=%d",
+            run_id
+        )
 
         connection = psycopg2.connect(**DB_CONFIG)
+
+        logging.info(
+            "Connected to PostgreSQL"
+        )
 
         # ------------------------------------------------------
         # 1. CREATE TABLES
         # ------------------------------------------------------
 
-        logging.info("Creating warehouse tables")
+        logging.info(
+            "Creating warehouse tables"
+        )
 
-        create_sql = read_sql_file(CREATE_SQL_FILE)
-        execute_sql(connection, create_sql)
+        create_sql = read_sql_file(
+            CREATE_SQL_FILE
+        )
 
-        logging.info("Warehouse tables verified")
+        execute_sql(
+            connection,
+            create_sql
+        )
 
         # ------------------------------------------------------
         # 2. LOAD DIMENSIONS
         # ------------------------------------------------------
 
-        logging.info("Loading warehouse dimensions")
+        logging.info(
+            "Loading warehouse dimensions"
+        )
 
         dimensions_sql = read_sql_file(
             LOAD_DIMENSIONS_SQL_FILE
         )
 
-        execute_sql(connection, dimensions_sql)
+        execute_sql(
+            connection,
+            dimensions_sql
+        )
 
         # ------------------------------------------------------
         # 3. LOAD FACT
         # ------------------------------------------------------
 
-        logging.info("Loading campaign performance facts")
+        logging.info(
+            "Loading campaign performance facts"
+        )
 
         fact_sql = read_sql_file(
             LOAD_FACT_SQL_FILE
         )
 
-        execute_sql(connection, fact_sql)
+        execute_sql(
+            connection,
+            fact_sql
+        )
 
-        # Commit everything together
+        # ------------------------------------------------------
+        # 4. COMMIT
+        # ------------------------------------------------------
+
         connection.commit()
 
-        logging.info("Warehouse data loaded successfully")
+        logging.info(
+            "Warehouse data committed successfully"
+        )
 
         # ------------------------------------------------------
-        # 4. ROW COUNT VALIDATION
+        # 5. GET COUNTS
         # ------------------------------------------------------
 
-        customer_count = get_row_count(
-            connection,
-            "dim_customer"
-        )
-
-        campaign_count = get_row_count(
-            connection,
-            "dim_campaign"
-        )
-
-        channel_count = get_row_count(
-            connection,
-            "dim_channel"
-        )
-
-        date_count = get_row_count(
-            connection,
-            "dim_date"
-        )
-
-        fact_count = get_row_count(
-            connection,
-            "fact_campaign_performance"
+        counts = get_warehouse_counts(
+            connection
         )
 
         logging.info(
@@ -156,11 +222,28 @@ def warehouse_setup():
             "channels=%d | "
             "dates=%d | "
             "facts=%d",
-            customer_count,
-            campaign_count,
-            channel_count,
-            date_count,
-            fact_count
+            counts["customers"],
+            counts["campaigns"],
+            counts["channels"],
+            counts["dates"],
+            counts["facts"],
+        )
+
+        # ------------------------------------------------------
+        # 6. WRITE SUCCESS AUDIT
+        # ------------------------------------------------------
+
+        mark_audit_success(
+            run_id=run_id,
+            customer_count=counts["customers"],
+            campaign_count=counts["campaigns"],
+            channel_count=counts["channels"],
+            date_count=counts["dates"],
+            fact_count=counts["facts"],
+        )
+
+        logging.info(
+            "Warehouse pipeline completed successfully"
         )
 
     except Exception as error:
@@ -171,6 +254,11 @@ def warehouse_setup():
         logging.error(
             "Warehouse pipeline failed: %s",
             error
+        )
+
+        mark_audit_failed(
+            run_id=run_id,
+            error_message=str(error),
         )
 
         raise
@@ -189,15 +277,7 @@ def main():
 
     setup_logging()
 
-    logging.info(
-        "Starting warehouse pipeline"
-    )
-
     warehouse_setup()
-
-    logging.info(
-        "Warehouse pipeline completed successfully"
-    )
 
 
 if __name__ == "__main__":
