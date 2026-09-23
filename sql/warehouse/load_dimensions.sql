@@ -1,3 +1,7 @@
+-- ============================================================
+-- LOAD CUSTOMER DIMENSION
+-- ============================================================
+
 INSERT INTO warehouse.dim_customer (
     customer_id,
     customer_name,
@@ -31,6 +35,10 @@ FROM generate_series(1, 10) AS gs
 ON CONFLICT (customer_id) DO NOTHING;
 
 
+-- ============================================================
+-- LOAD CAMPAIGN DIMENSION
+-- ============================================================
+
 INSERT INTO warehouse.dim_campaign (
     campaign_id,
     campaign_name,
@@ -40,11 +48,56 @@ INSERT INTO warehouse.dim_campaign (
     end_date
 )
 VALUES
-    (\dn
+    (
+        'CMP001',
+        'Summer Sale',
+        'Promotion',
+        'Increase Sales',
+        '2026-09-01',
+        '2026-09-07'
+    ),
+    (
+        'CMP002',
+        'New User Welcome',
+        'Lifecycle',
+        'User Activation',
+        '2026-09-03',
+        '2026-09-10'
+    ),
+    (
+        'CMP003',
+        'Weekend Cashback',
+        'Promotion',
+        'Increase Transactions',
+        '2026-09-05',
+        '2026-09-30'
+    ),
+    (
+        'CMP004',
+        'Win Back Customers',
+        'Retention',
+        'Reduce Churn',
+        '2026-09-08',
+        '2026-09-25'
+    ),
+    (
+        'CMP005',
+        'Premium Upgrade',
+        'Upsell',
+        'Increase Customer Value',
+        '2026-09-10',
+        '2026-09-30'
+    )
 ON CONFLICT (campaign_id) DO NOTHING;
 
 
-INSERT INTO warehouse.dim_channel (channel_name)
+-- ============================================================
+-- LOAD CHANNEL DIMENSION
+-- ============================================================
+
+INSERT INTO warehouse.dim_channel (
+    channel_name
+)
 VALUES
     ('Email'),
     ('SMS'),
@@ -53,6 +106,10 @@ VALUES
     ('Display')
 ON CONFLICT (channel_name) DO NOTHING;
 
+
+-- ============================================================
+-- LOAD DATE DIMENSION
+-- ============================================================
 
 INSERT INTO warehouse.dim_date (
     date_key,
