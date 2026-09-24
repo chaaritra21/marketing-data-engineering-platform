@@ -72,16 +72,54 @@ def marketing_pipeline():
         from src.warehouse.warehouse_quality import run_quality_checks
 
         print("Starting data quality checks...")
+
         results = run_quality_checks()
+
         print(f"Quality results: {results}")
         print("Data quality checks completed successfully.")
+
+        return results
+
+    @task(
+        retries=1,
+        retry_delay=timedelta(minutes=1),
+    )
+    def pipeline_monitoring(quality_results):
+        run_time = pendulum.now("UTC")
+
+        print("=" * 70)
+        print("MARKETING PIPELINE MONITORING SUMMARY")
+        print("=" * 70)
+
+        print(f"Pipeline run time (UTC): {run_time}")
+
+        print("Pipeline status: SUCCESS")
+
+        print("Quality metrics:")
+
+        if isinstance(quality_results, dict):
+            for metric, value in quality_results.items():
+                print(f"  {metric}: {value}")
+        else:
+            print(f"  Quality results: {quality_results}")
+
+        print("Pipeline stages completed:")
+        print("  API ingestion      : SUCCESS")
+        print("  Transformation     : SUCCESS")
+        print("  Warehouse load     : SUCCESS")
+        print("  Data quality       : SUCCESS")
+
+        print("=" * 70)
+        print("MARKETING PIPELINE COMPLETED SUCCESSFULLY")
+        print("=" * 70)
 
     ingestion = api_ingestion()
     transform = transformation()
     warehouse = warehouse_load()
     quality = data_quality()
+    monitoring = pipeline_monitoring(quality)
 
-    ingestion >> transform >> warehouse >> quality
+    ingestion >> transform >> warehouse >> quality >> monitoring
 
 
 marketing_pipeline()
