@@ -11,7 +11,7 @@ PROJECT_DIR = "/opt/airflow/project"
 
 @dag(
     dag_id="marketing_pipeline",
-    schedule=None,
+    schedule="30 0 * * *",
     start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
     catchup=False,
     tags=["marketing", "etl", "production"],
