@@ -1,8 +1,12 @@
+import os
+import sys
 import pendulum
 from datetime import timedelta
 
 from airflow.sdk import dag, task
-from airflow.providers.postgres.hooks.postgres import PostgresHook
+
+
+PROJECT_DIR = "/opt/airflow/project"
 
 
 @dag(
@@ -10,105 +14,74 @@ from airflow.providers.postgres.hooks.postgres import PostgresHook
     schedule=None,
     start_date=pendulum.datetime(2026, 1, 1, tz="UTC"),
     catchup=False,
-    tags=["marketing", "etl", "postgres"],
-    description="Main marketing data engineering pipeline",
+    tags=["marketing", "etl", "production"],
+    description="Production-style marketing data engineering pipeline",
 )
 def marketing_pipeline():
 
-    @task
-    def start_pipeline():
-        print("Starting marketing data pipeline")
+    @task(
+        retries=2,
+        retry_delay=timedelta(minutes=1),
+    )
+    def api_ingestion():
+        os.chdir(PROJECT_DIR)
+        sys.path.insert(0, PROJECT_DIR)
+
+        from src.ingestion.api_ingestion import main as run_ingestion
+
+        print("Starting API ingestion...")
+        run_ingestion()
+        print("API ingestion completed successfully.")
 
     @task(
         retries=2,
         retry_delay=timedelta(minutes=1),
     )
-    def check_warehouse():
-        hook = PostgresHook(
-            postgres_conn_id="marketing_postgres"
-        )
+    def transformation():
+        os.chdir(PROJECT_DIR)
+        sys.path.insert(0, PROJECT_DIR)
 
-        result = hook.get_first(
-            """
-            SELECT COUNT(*)
-            FROM warehouse.fact_campaign_performance;
-            """
-        )
+        from src.transformation.transform_posts import main as run_transformation
 
-        fact_count = result[0]
-
-        print(f"Fact rows available: {fact_count}")
-
-        if fact_count == 0:
-            raise ValueError("Fact table is empty")
+        print("Starting data transformation...")
+        run_transformation()
+        print("Data transformation completed successfully.")
 
     @task(
         retries=2,
         retry_delay=timedelta(minutes=1),
     )
-    def run_quality_check():
-        hook = PostgresHook(
-            postgres_conn_id="marketing_postgres"
-        )
+    def warehouse_load():
+        os.chdir(PROJECT_DIR)
+        sys.path.insert(0, PROJECT_DIR)
 
-        checks = {
-            "customers": """
-                SELECT COUNT(*)
-                FROM warehouse.dim_customer;
-            """,
-            "campaigns": """
-                SELECT COUNT(*)
-                FROM warehouse.dim_campaign;
-            """,
-            "channels": """
-                SELECT COUNT(*)
-                FROM warehouse.dim_channel;
-            """,
-            "dates": """
-                SELECT COUNT(*)
-                FROM warehouse.dim_date;
-            """,
-            "facts": """
-                SELECT COUNT(*)
-                FROM warehouse.fact_campaign_performance;
-            """,
-        }
+        from src.warehouse.warehouse_loader import warehouse_setup
 
-        results = {}
+        print("Starting warehouse load...")
+        warehouse_setup()
+        print("Warehouse load completed successfully.")
 
-        for name, query in checks.items():
-            result = hook.get_first(query)
-            results[name] = result[0]
+    @task(
+        retries=2,
+        retry_delay=timedelta(minutes=1),
+    )
+    def data_quality():
+        os.chdir(PROJECT_DIR)
+        sys.path.insert(0, PROJECT_DIR)
 
-        print(f"Warehouse quality results: {results}")
+        from src.warehouse.warehouse_quality import run_quality_checks
 
-        if results["customers"] == 0:
-            raise ValueError("Customer dimension is empty")
+        print("Starting data quality checks...")
+        results = run_quality_checks()
+        print(f"Quality results: {results}")
+        print("Data quality checks completed successfully.")
 
-        if results["campaigns"] == 0:
-            raise ValueError("Campaign dimension is empty")
+    ingestion = api_ingestion()
+    transform = transformation()
+    warehouse = warehouse_load()
+    quality = data_quality()
 
-        if results["channels"] == 0:
-            raise ValueError("Channel dimension is empty")
-
-        if results["dates"] == 0:
-            raise ValueError("Date dimension is empty")
-
-        if results["facts"] == 0:
-            raise ValueError("Fact table is empty")
-
-        print("All warehouse quality checks passed")
-
-    @task
-    def finish_pipeline():
-        print("Marketing data pipeline completed successfully")
-
-    start = start_pipeline()
-    warehouse = check_warehouse()
-    quality = run_quality_check()
-    finish = finish_pipeline()
-
-    start >> warehouse >> quality >> finish
+    ingestion >> transform >> warehouse >> quality
 
 
 marketing_pipeline()
